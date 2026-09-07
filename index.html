@@ -16,13 +16,24 @@
     touch-action: pan-y;
   }
 
-  /* 指1本のきれいなタップでなくても操作できるように。
-     長く触れたときの文字選択・拡大鏡・コンテキストメニューを抑える。 */
-  button, .preset-chip {
-    touch-action: manipulation;
+  /* 指1本のきれいなタップでなくても操作できるように。 */
+  button, .preset-chip { touch-action: manipulation; }
+
+  /* 触れた文字が青く選択されるのを画面全体で止める。
+     拡大鏡とコンテキストメニューも出さない。
+     編集画面の入力欄だけは、文字を選べないと困るので除外する。 */
+  body {
     -webkit-user-select: none; user-select: none;
     -webkit-touch-callout: none;
   }
+  input, textarea {
+    -webkit-user-select: text; user-select: text;
+    -webkit-touch-callout: default;
+  }
+
+  /* タップ後に青いフォーカス枠が残らないようにする。
+     キーボードやスイッチ操作での枠は残す（どこを選んでいるか分からなくなるため）。 */
+  button:focus:not(:focus-visible) { outline: none; }
 
   /* ── タブ ── */
   #tabs {
