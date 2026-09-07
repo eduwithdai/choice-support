@@ -11,6 +11,17 @@
     font-family: 'Hiragino Kaku Gothic ProN', 'Noto Sans JP', sans-serif;
     display: flex; flex-direction: column;
     background: #f5f5f5;
+    /* 複数の指が触れてもピンチズームで画面が動かないようにする
+       （編集画面の縦スクロールは残す） */
+    touch-action: pan-y;
+  }
+
+  /* 指1本のきれいなタップでなくても操作できるように。
+     長く触れたときの文字選択・拡大鏡・コンテキストメニューを抑える。 */
+  button, .preset-chip {
+    touch-action: manipulation;
+    -webkit-user-select: none; user-select: none;
+    -webkit-touch-callout: none;
   }
 
   /* ── タブ ── */
@@ -191,8 +202,6 @@
      進捗は背景グラデーションの幅で表す。button の中に絶対配置した要素は
      幅の 100% が解決されない（高さは解決される）ため、この方式にしている。 */
   #edit-open-btn {
-    -webkit-user-select: none; user-select: none;
-    -webkit-touch-callout: none; touch-action: manipulation;
     background-image: linear-gradient(rgba(255,255,255,0.5), rgba(255,255,255,0.5));
     background-repeat: no-repeat;
     background-size: 0% 100%;
@@ -436,9 +445,9 @@
 
 <!-- タブ -->
 <div id="tabs">
-  <button class="tab-btn active" onclick="switchTab('choice')">🗳️ えらぶ</button>
-  <button class="tab-btn"        onclick="switchTab('janken')">✊ じゃんけん</button>
-  <button id="sound-toggle-btn" onclick="toggleSound()" title="タップ音のON/OFF">🔊</button>
+  <button class="tab-btn active" id="tab-choice-btn">🗳️ えらぶ</button>
+  <button class="tab-btn"        id="tab-janken-btn">✊ じゃんけん</button>
+  <button id="sound-toggle-btn" title="タップ音のON/OFF">🔊</button>
 </div>
 
 <div id="content">
@@ -455,7 +464,7 @@
         <div id="preset-chips"></div>
         <!-- リセットは visibility で出し入れする。display だと出現時に
              左右のボタンがずれるため、隠している間も場所を確保しておく。 -->
-        <button id="reset-btn" class="sub-btn" onclick="resetChoice()"
+        <button id="reset-btn" class="sub-btn"
           style="visibility:hidden;background:#fff;border:2px solid #bbb;color:#555;">リセット</button>
         <button class="sub-btn"
           id="edit-open-btn" title="長押しすると編集画面が開きます"
@@ -499,7 +508,7 @@
           <div id="preview-choices"></div>
         </div>
 
-        <button id="done-btn" onclick="closeEdit()">✅ 完成して使う</button>
+        <button id="done-btn">✅ 完成して使う</button>
       </div>
     </div>
   </div>
@@ -509,10 +518,8 @@
     <div class="jan-header">
       <div class="jan-title">✊ じゃんけん</div>
       <div class="jan-mode-btns">
-        <button class="jan-mode-btn active-jmode" id="jmode-select"
-          onclick="setJanMode('select')">🙋 手を選ぶ</button>
-        <button class="jan-mode-btn" id="jmode-vs"
-          onclick="setJanMode('vs')">🤖 CPUと対戦</button>
+        <button class="jan-mode-btn active-jmode" id="jmode-select">🙋 手を選ぶ</button>
+        <button class="jan-mode-btn" id="jmode-vs">🤖 CPUと対戦</button>
       </div>
     </div>
 
@@ -522,8 +529,7 @@
       <div class="jan-feedback-row">
         <div id="jan-msg"></div>
         <button id="jan-reset-btn" class="sub-btn"
-          style="display:none;background:#fff;border:2px solid #bbb;color:#555;"
-          onclick="resetJan()">リセット</button>
+          style="display:none;background:#fff;border:2px solid #bbb;color:#555;">リセット</button>
       </div>
     </div>
 
@@ -551,7 +557,7 @@
         </div>
         <div id="result-bar">
           <div id="result-label"></div>
-          <button id="retry-btn" onclick="resetVs()">もう一度</button>
+          <button id="retry-btn">もう一度</button>
         </div>
       </div>
     </div>
@@ -673,6 +679,41 @@ const state = {
   selected : null,
 };
 
+// ─── タップ処理 ────────────────────────────────────────────
+// 指1本できれいにタップできなくても操作できるようにするための共通処理。
+//
+// click は「押した指と離した指が同じ場所」でないと発生せず、iPad では
+// 複数の指や手のひらが同時に触れると発生しないことがある。そのため
+// 触れた瞬間（touchstart）で反応させ、click は補助として残している。
+//
+// 触れた瞬間に反応させると、複数の指が同時に触れたときや手のひらが
+// 2つのボタンにまたがったときに何度も反応してしまう。これを防ぐため、
+// 一度反応したら TAP_LOCKOUT_MS の間は次の接触を無視する。
+const TAP_LOCKOUT_MS = 400;   // 反応してから次を受け付けるまでの時間
+const SYNTH_CLICK_MS = 1200;  // タッチ由来の合成 click とみなす猶予
+let lastActivateAt = 0;
+let lastTouchAt = 0;
+
+function activateTap(handler, e) {
+  const now = performance.now();
+  if (now - lastActivateAt < TAP_LOCKOUT_MS) return;  // 連続した接触は1回だけ
+  lastActivateAt = now;
+  handler(e);
+}
+
+function bindTap(el, handler) {
+  el.addEventListener("touchstart", (e) => {
+    lastTouchAt = performance.now();
+    activateTap(handler, e);
+  }, { passive: true });
+  el.addEventListener("click", (e) => {
+    // タッチで既に反応済みの合成 click は捨てる。
+    // マウス操作とキーボード（Enter / Space）はここで拾う。
+    if (performance.now() - lastTouchAt < SYNTH_CLICK_MS) return;
+    activateTap(handler, e);
+  });
+}
+
 // ─── プリセット切り替え ────────────────────────────────────
 function applyPreset(key) {
   const p = PRESETS[key];
@@ -696,7 +737,7 @@ function renderPresetChips() {
     const chip = document.createElement("button");
     chip.className = "preset-chip" + (currentPreset === key ? " active" : "");
     chip.textContent = PRESETS[key].name;
-    chip.onclick = () => applyPreset(key);
+    bindTap(chip, () => applyPreset(key));
     wrap.appendChild(chip);
   });
 }
@@ -752,7 +793,7 @@ function renderChoiceButtons() {
       if (col.text) btn.style.color = col.text;
       btn.innerHTML = `<span class="choice-label">${text}</span>`;
     }
-    btn.onclick = () => selectChoice(idx, col, text, btn, img);
+    bindTap(btn, () => selectChoice(idx, col, text, btn, img));
     row.appendChild(btn);
   });
 }
@@ -876,11 +917,16 @@ function hideTapPopup() {
 // ─── 編集ボタン：長押しで開く ───────────────────────────────
 // 誤タップで編集画面に入らないよう、一定時間押し続けたときだけ開く。
 // 押している間はボタンが白く満ちていき、進み具合が分かる。
+// 手が震えても続けられるよう、多少動いても中止しない。
+// ボタンから完全に離れた場合は pointerleave 側で中止する。
 const EDIT_HOLD_MS = 800;   // 長押しと判定するまでの時間
-const HOLD_MOVE_TOL = 12;   // これ以上指が動いたら長押しを中止（px）
+const HOLD_MOVE_TOL = 40;   // これ以上指が動いたら長押しを中止（px）
 (function () {
   const btn = document.getElementById("edit-open-btn");
   let timer = null, raf = null, holdStart = 0, startX = 0, startY = 0;
+  // 押し始めた指を覚えておき、その指が離れたときだけ中止する。
+  // 複数の指が触れても、別の指が離れただけで中断しないようにするため。
+  let holdPointerId = null;
 
   // pointer / touch / mouse のどれで来ても座標を取り出す
   function pt(e) {
@@ -900,13 +946,20 @@ const HOLD_MOVE_TOL = 12;   // これ以上指が動いたら長押しを中止�
   function cancelHold() {
     if (timer) { clearTimeout(timer); timer = null; }
     if (raf) { cancelAnimationFrame(raf); raf = null; }
+    holdPointerId = null;
     setProgress(0);
+  }
+  // 押し始めた指以外のイベントは無視する
+  function isHoldPointer(e) {
+    return holdPointerId === null || e.pointerId === undefined ||
+           e.pointerId === holdPointerId;
   }
   function startHold(e) {
     if (timer) return;
     if (e.button !== undefined && e.button !== 0) return; // 右クリック等は無視
     const p = pt(e);
     startX = p.x; startY = p.y;
+    holdPointerId = (e.pointerId !== undefined) ? e.pointerId : null;
     holdStart = performance.now();
     raf = requestAnimationFrame(tick);
     timer = setTimeout(() => {
@@ -917,10 +970,14 @@ const HOLD_MOVE_TOL = 12;   // これ以上指が動いたら長押しを中止�
     }, EDIT_HOLD_MS);
   }
   function moveHold(e) {
-    if (!timer) return;
+    if (!timer || !isHoldPointer(e)) return;
     const p = pt(e);
     if (Math.abs(p.x - startX) > HOLD_MOVE_TOL ||
         Math.abs(p.y - startY) > HOLD_MOVE_TOL) cancelHold();
+  }
+  function endHold(e) {
+    if (!isHoldPointer(e)) return;   // 別の指が離れただけなら続行
+    cancelHold();
   }
 
   // 短いタップでは何も起こさない（既定の click も無効化）
@@ -931,15 +988,17 @@ const HOLD_MOVE_TOL = 12;   // これ以上指が動いたら長押しを中止�
   if (window.PointerEvent) {
     btn.addEventListener("pointerdown", startHold);
     btn.addEventListener("pointermove", moveHold);
-    btn.addEventListener("pointerup", cancelHold);
-    btn.addEventListener("pointerleave", cancelHold);
-    btn.addEventListener("pointercancel", cancelHold);
+    btn.addEventListener("pointerup", endHold);
+    btn.addEventListener("pointerleave", endHold);
+    btn.addEventListener("pointercancel", endHold);
   } else {
     // PointerEvent 非対応の古い端末向けフォールバック
     btn.addEventListener("touchstart", startHold, { passive: true });
     btn.addEventListener("touchmove", moveHold, { passive: true });
-    btn.addEventListener("touchend", cancelHold);
-    btn.addEventListener("touchcancel", cancelHold);
+    // 指がすべて離れたときだけ中止する（複数の指で押していても続行）
+    const touchEnd = (e) => { if (!e.touches || e.touches.length === 0) cancelHold(); };
+    btn.addEventListener("touchend", touchEnd);
+    btn.addEventListener("touchcancel", touchEnd);
     btn.addEventListener("mousedown", startHold);
     btn.addEventListener("mousemove", moveHold);
     btn.addEventListener("mouseup", cancelHold);
@@ -1186,7 +1245,7 @@ function renderJanHandRow() {
     const btn = document.createElement("button");
     btn.className = "jan-btn";
     btn.innerHTML = `<img class="jan-img" src="${j.img}" alt="${j.label}"><span class="jan-label">${j.label}</span>`;
-    btn.onclick = () => selectJan(idx, j, btn);
+    bindTap(btn, () => selectJan(idx, j, btn));
     row.appendChild(btn);
   });
 }
@@ -1239,7 +1298,7 @@ function renderVsHandRow() {
     const btn = document.createElement("button");
     btn.className = "jan-btn";
     btn.innerHTML = `<img class="jan-img" src="${j.img}" alt="${j.label}"><span class="jan-label">${j.label}</span>`;
-    btn.onclick = () => playVs(idx, btn);
+    bindTap(btn, () => playVs(idx, btn));
     row.appendChild(btn);
   });
 }
@@ -1323,6 +1382,19 @@ function setJanMode(mode) {
 }
 
 // ─── 初期化 ───────────────────────────────────────────────
+// 固定のボタンを、触れた瞬間に反応するタップ処理へつなぐ
+[
+  ["tab-choice-btn",   () => switchTab("choice")],
+  ["tab-janken-btn",   () => switchTab("janken")],
+  ["sound-toggle-btn", () => toggleSound()],
+  ["reset-btn",        () => resetChoice()],
+  ["done-btn",         () => closeEdit()],
+  ["jmode-select",     () => setJanMode("select")],
+  ["jmode-vs",         () => setJanMode("vs")],
+  ["jan-reset-btn",    () => resetJan()],
+  ["retry-btn",        () => resetVs()],
+].forEach(([id, fn]) => bindTap(document.getElementById(id), fn));
+
 applyPalette();
 renderChoiceButtons();
 renderJanHandRow();
