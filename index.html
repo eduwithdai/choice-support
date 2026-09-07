@@ -184,6 +184,18 @@
   }
   .sub-btn:active { opacity: .75; }
 
+  /* 編集ボタン：長押しで開く（誤タップ防止）
+     進捗は背景グラデーションの幅で表す。button の中に絶対配置した要素は
+     幅の 100% が解決されない（高さは解決される）ため、この方式にしている。 */
+  #edit-open-btn {
+    -webkit-user-select: none; user-select: none;
+    -webkit-touch-callout: none; touch-action: manipulation;
+    background-image: linear-gradient(rgba(255,255,255,0.5), rgba(255,255,255,0.5));
+    background-repeat: no-repeat;
+    background-size: 0% 100%;
+  }
+  #edit-open-btn .hold-sub { font-size: .8em; opacity: .85; }
+
   /* ── えらぶ：編集 ── */
   #edit-screen { background: #f9f9f9; }
   .edit-cols { flex: 1; display: flex; gap: 20px; overflow: hidden; }
@@ -441,9 +453,9 @@
         <div id="preset-chips"></div>
         <button id="reset-btn" class="sub-btn" onclick="resetChoice()"
           style="display:none;background:#fff;border:2px solid #bbb;color:#555;">リセット</button>
-        <button class="sub-btn" onclick="openEdit()"
-          id="edit-open-btn"
-          style="background:var(--btn,#FF6B35);border:2px solid var(--btn,#FF6B35);color:#fff;">⚙️ 編集</button>
+        <button class="sub-btn"
+          id="edit-open-btn" title="長押しすると編集画面が開きます"
+          style="background-color:var(--btn,#FF6B35);border:2px solid var(--btn,#FF6B35);color:#fff;">⚙️ 編集<span class="hold-sub">（長押し）</span></button>
       </div>
     </div>
   </div>
@@ -704,7 +716,9 @@ function applyPalette() {
   document.documentElement.style.setProperty("--btn", p.btn);
   document.getElementById("play-screen").style.background = p.bg;
   const editBtn = document.getElementById("edit-open-btn");
-  editBtn.style.background = p.btn;
+  // 長押しの進捗を background-image で描いているため、
+  // ショートハンドの background ではなく backgroundColor を使う
+  editBtn.style.backgroundColor = p.btn;
   editBtn.style.borderColor = p.btn;
   const doneBtn = document.getElementById("done-btn");
   doneBtn.style.background = p.btn;
@@ -853,6 +867,80 @@ function hideTapPopup() {
       lastTap = now;
     }
   });
+})();
+
+// ─── 編集ボタン：長押しで開く ───────────────────────────────
+// 誤タップで編集画面に入らないよう、一定時間押し続けたときだけ開く。
+// 押している間はボタンが白く満ちていき、進み具合が分かる。
+const EDIT_HOLD_MS = 800;   // 長押しと判定するまでの時間
+const HOLD_MOVE_TOL = 12;   // これ以上指が動いたら長押しを中止（px）
+(function () {
+  const btn = document.getElementById("edit-open-btn");
+  let timer = null, raf = null, holdStart = 0, startX = 0, startY = 0;
+
+  // pointer / touch / mouse のどれで来ても座標を取り出す
+  function pt(e) {
+    const t = e.touches && e.touches[0];
+    return t ? { x: t.clientX, y: t.clientY } : { x: e.clientX, y: e.clientY };
+  }
+  // 進捗バーの描画。CSS トランジションは button 相手だと発火しないため、
+  // 毎フレーム background-size を直接書き換えている。
+  function setProgress(pct) {
+    btn.style.backgroundSize = pct + "% 100%";
+  }
+  function tick(now) {
+    const pct = Math.min(100, (now - holdStart) / EDIT_HOLD_MS * 100);
+    setProgress(pct);
+    if (pct < 100) raf = requestAnimationFrame(tick);
+  }
+  function cancelHold() {
+    if (timer) { clearTimeout(timer); timer = null; }
+    if (raf) { cancelAnimationFrame(raf); raf = null; }
+    setProgress(0);
+  }
+  function startHold(e) {
+    if (timer) return;
+    if (e.button !== undefined && e.button !== 0) return; // 右クリック等は無視
+    const p = pt(e);
+    startX = p.x; startY = p.y;
+    holdStart = performance.now();
+    raf = requestAnimationFrame(tick);
+    timer = setTimeout(() => {
+      timer = null;
+      cancelHold();
+      playTapSound();
+      openEdit();
+    }, EDIT_HOLD_MS);
+  }
+  function moveHold(e) {
+    if (!timer) return;
+    const p = pt(e);
+    if (Math.abs(p.x - startX) > HOLD_MOVE_TOL ||
+        Math.abs(p.y - startY) > HOLD_MOVE_TOL) cancelHold();
+  }
+
+  // 短いタップでは何も起こさない（既定の click も無効化）
+  btn.addEventListener("click", (e) => e.preventDefault());
+  // 長押しでOSのコンテキストメニューが出るのを抑止
+  btn.addEventListener("contextmenu", (e) => e.preventDefault());
+
+  if (window.PointerEvent) {
+    btn.addEventListener("pointerdown", startHold);
+    btn.addEventListener("pointermove", moveHold);
+    btn.addEventListener("pointerup", cancelHold);
+    btn.addEventListener("pointerleave", cancelHold);
+    btn.addEventListener("pointercancel", cancelHold);
+  } else {
+    // PointerEvent 非対応の古い端末向けフォールバック
+    btn.addEventListener("touchstart", startHold, { passive: true });
+    btn.addEventListener("touchmove", moveHold, { passive: true });
+    btn.addEventListener("touchend", cancelHold);
+    btn.addEventListener("touchcancel", cancelHold);
+    btn.addEventListener("mousedown", startHold);
+    btn.addEventListener("mousemove", moveHold);
+    btn.addEventListener("mouseup", cancelHold);
+    btn.addEventListener("mouseleave", cancelHold);
+  }
 })();
 
 // ─── えらぶ：編集 ──────────────────────────────────────────
