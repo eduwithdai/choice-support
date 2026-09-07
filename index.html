@@ -6,13 +6,14 @@
 <title>えらぶ・じゃんけん</title>
 <style>
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; margin: 0; padding: 0; }
+  /* ダブルタップやピンチで画面が拡大しないようにする。
+     縦スクロール（編集画面）だけは残す。 */
+  html { touch-action: pan-y; }
   body {
     width: 100vw; height: 100vh; overflow: hidden;
     font-family: 'Hiragino Kaku Gothic ProN', 'Noto Sans JP', sans-serif;
     display: flex; flex-direction: column;
     background: #f5f5f5;
-    /* 複数の指が触れてもピンチズームで画面が動かないようにする
-       （編集画面の縦スクロールは残す） */
     touch-action: pan-y;
   }
 
@@ -139,6 +140,8 @@
     background: rgba(0,0,0,0.55);
     display: none; align-items: center; justify-content: center;
     cursor: default;
+    /* ここは閉じるのにダブルタップを使うので、拡大は完全に禁止する */
+    touch-action: none;
   }
   #tap-popup-overlay.show { display: flex; }
   #tap-popup-hint {
@@ -725,6 +728,31 @@ function bindTap(el, handler) {
   });
 }
 
+// ダブルタップとみなす間隔。拡大の抑止と、拡大表示を閉じる判定で共通に使う。
+const DOUBLE_TAP_MS = 350;
+
+// ─── 画面の拡大を止める ────────────────────────────────────
+// iOS Safari は viewport の user-scalable=no を無視するため、
+// CSS の touch-action に加えて JS でもダブルタップ拡大とピンチ拡大を止める。
+// 入力欄の上では標準の動作を残す（カーソル移動などができなくなるため）。
+(function () {
+  let lastTouchEnd = 0;
+  document.addEventListener("touchend", (e) => {
+    const now = Date.now();
+    const inField = e.target && e.target.closest &&
+                    e.target.closest("input, textarea");
+    if (now - lastTouchEnd <= DOUBLE_TAP_MS && !inField) {
+      e.preventDefault();   // 素早い2回目のタップ＝ダブルタップ拡大を止める
+    }
+    lastTouchEnd = now;
+  }, { passive: false });
+
+  // iOS のピンチ操作
+  ["gesturestart", "gesturechange", "gestureend"].forEach((type) => {
+    document.addEventListener(type, (e) => e.preventDefault(), { passive: false });
+  });
+})();
+
 // ─── プリセット切り替え ────────────────────────────────────
 function applyPreset(key) {
   const p = PRESETS[key];
@@ -915,7 +943,7 @@ function hideTapPopup() {
   let lastTap = 0;
   overlay.addEventListener("touchend", (e) => {
     const now = Date.now();
-    if (now - lastTap < 350) {
+    if (now - lastTap < DOUBLE_TAP_MS) {
       e.preventDefault();
       hideTapPopup();
       lastTap = 0;
