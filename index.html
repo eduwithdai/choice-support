@@ -150,19 +150,22 @@
     font-weight: bold; color: #333; text-align: center;
   }
 
+  /* 操作ボタンは常に右端。メッセージの有無で左右に動かさない */
   .feedback-row {
     display: flex; align-items: center;
-    justify-content: space-between; gap: 12px;
+    justify-content: flex-end; gap: 12px;
     flex-shrink: 0; min-height: 44px;
   }
   #feedback-msg {
     background: #fff; border-radius: 14px;
+    margin-right: auto; min-width: 0;
     padding: 8px 20px; display: none;
     font-size: clamp(13px,1.8vw,20px); font-weight: bold;
     box-shadow: 0 2px 10px rgba(0,0,0,0.08);
     animation: slideUp 0.3s ease;
   }
-  .ctrl-btns { display: flex; gap: 8px; align-items: center; }
+  /* メッセージが長くてもボタン側は縮ませない（幅を保って右端に固定） */
+  .ctrl-btns { display: flex; gap: 8px; align-items: center; flex-shrink: 0; }
   #preset-chips { display: flex; gap: 6px; }
   .preset-chip {
     padding: 8px 14px; border-radius: 20px;
@@ -194,7 +197,6 @@
     background-repeat: no-repeat;
     background-size: 0% 100%;
   }
-  #edit-open-btn .hold-sub { font-size: .8em; opacity: .85; }
 
   /* ── えらぶ：編集 ── */
   #edit-screen { background: #f9f9f9; }
@@ -451,11 +453,13 @@
       <div id="feedback-msg"></div>
       <div class="ctrl-btns">
         <div id="preset-chips"></div>
+        <!-- リセットは visibility で出し入れする。display だと出現時に
+             左右のボタンがずれるため、隠している間も場所を確保しておく。 -->
         <button id="reset-btn" class="sub-btn" onclick="resetChoice()"
-          style="display:none;background:#fff;border:2px solid #bbb;color:#555;">リセット</button>
+          style="visibility:hidden;background:#fff;border:2px solid #bbb;color:#555;">リセット</button>
         <button class="sub-btn"
           id="edit-open-btn" title="長押しすると編集画面が開きます"
-          style="background-color:var(--btn,#FF6B35);border:2px solid var(--btn,#FF6B35);color:#fff;">⚙️ 編集<span class="hold-sub">（長押し）</span></button>
+          style="background-color:var(--btn,#FF6B35);border:2px solid var(--btn,#FF6B35);color:#fff;">⚙️ 編集</button>
       </div>
     </div>
   </div>
@@ -801,7 +805,7 @@ function selectChoice(idx, col, text, btn, img) {
   msg.style.animation = "none";
   requestAnimationFrame(() => { msg.style.animation = "slideUp .3s ease"; });
 
-  document.getElementById("reset-btn").style.display = "block";
+  document.getElementById("reset-btn").style.visibility = "visible";
   state.selected = idx;
 
   // 大きなポップアップ表示
@@ -824,7 +828,7 @@ function resetChoice() {
     }
   });
   document.getElementById("feedback-msg").style.display = "none";
-  document.getElementById("reset-btn").style.display = "none";
+  document.getElementById("reset-btn").style.visibility = "hidden";
   state.selected = null;
 }
 
