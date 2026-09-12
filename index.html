@@ -140,7 +140,7 @@
     background: rgba(0,0,0,0.55);
     display: none; align-items: center; justify-content: center;
     cursor: default;
-    /* ここは閉じるのにダブルタップを使うので、拡大は完全に禁止する */
+    /* 長押しで閉じるので、拡大や選択の動作は完全に禁止する */
     touch-action: none;
   }
   #tap-popup-overlay.show { display: flex; }
@@ -150,7 +150,11 @@
     color: rgba(255,255,255,0.85);
     font-size: clamp(13px,1.8vw,18px);
     font-weight: bold;
-    background: rgba(0,0,0,0.25);
+    /* 長押しの進み具合を背景の幅で表す（JS が毎フレーム書き換える） */
+    background-color: rgba(0,0,0,0.25);
+    background-image: linear-gradient(rgba(255,255,255,0.55), rgba(255,255,255,0.55));
+    background-repeat: no-repeat;
+    background-size: 0% 100%;
     padding: 8px 18px; border-radius: 20px;
     pointer-events: none;
   }
@@ -580,8 +584,8 @@
 </div><!-- /content -->
 
 <!-- ═══ タップ拡大ポップアップ ═══ -->
-<div id="tap-popup-overlay" ondblclick="hideTapPopup()">
-  <div id="tap-popup-hint">ダブルタップで閉じる</div>
+<div id="tap-popup-overlay">
+  <div id="tap-popup-hint">長押しで閉じる</div>
   <div id="tap-popup-card">
     <img id="tap-popup-img" style="display:none;">
     <div id="tap-popup-emoji" style="display:none;"></div>
@@ -930,27 +934,75 @@ function showTapPopup({ image, text, emoji }) {
   }
   textEl.textContent = text || "";
 
+  // 前回の長押しの進み具合が残らないようにしてから開く
+  document.getElementById("tap-popup-hint").style.backgroundSize = "0% 100%";
   overlay.classList.add("show");
 }
 function hideTapPopup() {
   document.getElementById("tap-popup-overlay").classList.remove("show");
 }
 
-// iPad Safari 等ではネイティブの dblclick がズーム操作と競合しやすいため、
-// タッチ端末向けに手動でダブルタップ判定を行う
+// ─── 拡大表示：長押しで閉じる ───────────────────────────────
+// すぐ閉じてしまわないよう、押し続けたときだけ閉じる。
+// 以前はダブルタップだったが、素早く2回タップするのは手が不自由だと
+// 難しいため、触れ続けるだけで済む長押しにしている。
+// 画面のどこを押しても閉じられる。指が多少ずれても中断しない。
+const POPUP_CLOSE_HOLD_MS = 600;  // 押し続ける時間
 (function () {
   const overlay = document.getElementById("tap-popup-overlay");
-  let lastTap = 0;
-  overlay.addEventListener("touchend", (e) => {
-    const now = Date.now();
-    if (now - lastTap < DOUBLE_TAP_MS) {
-      e.preventDefault();
+  const hint = document.getElementById("tap-popup-hint");
+  let timer = null, raf = null, holdStart = 0, holdPointerId = null;
+
+  function setProgress(pct) { hint.style.backgroundSize = pct + "% 100%"; }
+  function tick(now) {
+    const pct = Math.min(100, (now - holdStart) / POPUP_CLOSE_HOLD_MS * 100);
+    setProgress(pct);
+    if (pct < 100) raf = requestAnimationFrame(tick);
+  }
+  function cancelHold() {
+    if (timer) { clearTimeout(timer); timer = null; }
+    if (raf) { cancelAnimationFrame(raf); raf = null; }
+    holdPointerId = null;
+    setProgress(0);
+  }
+  function startHold(e) {
+    if (timer) return;
+    if (e.button !== undefined && e.button !== 0) return;  // 右クリック等は無視
+    holdPointerId = (e.pointerId !== undefined) ? e.pointerId : null;
+    holdStart = performance.now();
+    raf = requestAnimationFrame(tick);
+    timer = setTimeout(() => {
+      timer = null;
+      cancelHold();
       hideTapPopup();
-      lastTap = 0;
-    } else {
-      lastTap = now;
-    }
+    }, POPUP_CLOSE_HOLD_MS);
+  }
+  function endHold(e) {
+    // 押し始めた指以外が離れただけなら続行する
+    if (holdPointerId !== null && e.pointerId !== undefined &&
+        e.pointerId !== holdPointerId) return;
+    cancelHold();
+  }
+
+  if (window.PointerEvent) {
+    overlay.addEventListener("pointerdown", startHold);
+    overlay.addEventListener("pointerup", endHold);
+    overlay.addEventListener("pointercancel", endHold);
+  } else {
+    // PointerEvent 非対応の古い端末向け
+    overlay.addEventListener("touchstart", startHold, { passive: true });
+    const touchEnd = (e) => { if (!e.touches || e.touches.length === 0) cancelHold(); };
+    overlay.addEventListener("touchend", touchEnd);
+    overlay.addEventListener("touchcancel", touchEnd);
+    overlay.addEventListener("mousedown", startHold);
+    overlay.addEventListener("mouseup", cancelHold);
+  }
+
+  // キーボードやスイッチ操作しかできない場合の逃げ道
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && overlay.classList.contains("show")) hideTapPopup();
   });
+
 })();
 
 // ─── 編集ボタン：長押しで開く ───────────────────────────────
