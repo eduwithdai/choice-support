@@ -947,7 +947,7 @@ function hideTapPopup() {
 // 以前はダブルタップだったが、素早く2回タップするのは手が不自由だと
 // 難しいため、触れ続けるだけで済む長押しにしている。
 // 画面のどこを押しても閉じられる。指が多少ずれても中断しない。
-const POPUP_CLOSE_HOLD_MS = 600;  // 押し続ける時間
+const POPUP_CLOSE_HOLD_MS = 1000;  // 押し続ける時間
 (function () {
   const overlay = document.getElementById("tap-popup-overlay");
   const hint = document.getElementById("tap-popup-hint");
