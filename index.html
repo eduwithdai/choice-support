@@ -178,6 +178,18 @@
     font-size: clamp(28px,5vw,64px);
     font-weight: bold; color: #333; text-align: center;
   }
+  /* 拡大表示の中の「音を出す」ボタン。
+     手が不自由でも押しやすいよう、大きめの当たり判定にしている。 */
+  #tap-popup-voice-btn {
+    align-items: center; justify-content: center; gap: 10px;
+    min-height: 64px; padding: 12px 32px;
+    border: 3px solid #4A90D9; border-radius: 40px;
+    background: #4A90D9; color: #fff;
+    font-family: inherit; font-weight: bold;
+    font-size: clamp(18px,2.6vw,30px);
+    cursor: pointer;
+  }
+  #tap-popup-voice-btn:active { opacity: .75; }
 
   /* 操作ボタンは常に右端。メッセージの有無で左右に動かさない */
   .feedback-row {
@@ -590,6 +602,8 @@
     <img id="tap-popup-img" style="display:none;">
     <div id="tap-popup-emoji" style="display:none;"></div>
     <div id="tap-popup-text"></div>
+    <!-- 読み上げ音声があるときだけ出る。押したときだけ声が鳴る。 -->
+    <button id="tap-popup-voice-btn" style="display:none;">🔊 音を出す</button>
   </div>
 </div>
 
@@ -716,6 +730,27 @@ function playJanVoice(key) {
     const audio = janVoices[key];
     if (audio) audio.play().catch(() => {});
   } catch (e) {}
+}
+
+// 音声を鳴らし、鳴り終わってから次の処理を呼ぶ。
+// 音がOFFのときや再生できなかったときも、処理が止まらないよう次へ進める。
+function playJanVoiceThen(key, done) {
+  const audio = janVoices[key];
+  if (!soundEnabled || !audio) { done(); return; }
+  let finished = false;
+  let fallback = null;
+  const finish = () => {
+    if (finished) return;
+    finished = true;
+    audio.removeEventListener("ended", finish);
+    clearTimeout(fallback);
+    done();
+  };
+  audio.addEventListener("ended", finish);
+  // 再生できなかったときに先へ進めなくならないための保険
+  const ms = (isFinite(audio.duration) ? audio.duration * 1000 : 800) + 200;
+  fallback = setTimeout(finish, ms);
+  playJanVoice(key);
 }
 
 const state = {
@@ -948,7 +983,10 @@ function resetChoice() {
 }
 
 // ─── タップ拡大ポップアップ ─────────────────────────────────
-function showTapPopup({ image, text, emoji }) {
+// 拡大表示の「音を出す」ボタンが鳴らす声。null ならボタンを出さない。
+let popupVoiceKey = null;
+
+function showTapPopup({ image, text, emoji, voice }) {
   const overlay = document.getElementById("tap-popup-overlay");
   const imgEl = document.getElementById("tap-popup-img");
   const emojiEl = document.getElementById("tap-popup-emoji");
@@ -964,6 +1002,13 @@ function showTapPopup({ image, text, emoji }) {
     imgEl.style.display = "none";
   }
   textEl.textContent = text || "";
+
+  // 読み上げ音声が用意されている手のときだけボタンを出す。
+  // 選んだ時点では鳴らさず、押したときに鳴らす（選んだ内容が音で相手に
+  // 伝わってしまわないようにするため）。
+  popupVoiceKey = voice || null;
+  document.getElementById("tap-popup-voice-btn").style.display =
+    popupVoiceKey ? "flex" : "none";
 
   // 前回の長押しの進み具合が残らないようにしてから開く
   document.getElementById("tap-popup-hint").style.backgroundSize = "0% 100%";
@@ -999,6 +1044,9 @@ const POPUP_CLOSE_HOLD_MS = 1000;  // 押し続ける時間
   function startHold(e) {
     if (timer) return;
     if (e.button !== undefined && e.button !== 0) return;  // 右クリック等は無視
+    // 「音を出す」ボタンを押している間は閉じない
+    if (e.target && e.target.closest &&
+        e.target.closest("#tap-popup-voice-btn")) return;
     holdPointerId = (e.pointerId !== undefined) ? e.pointerId : null;
     holdStart = performance.now();
     raf = requestAnimationFrame(tick);
@@ -1373,7 +1421,9 @@ function renderJanHandRow() {
 }
 
 function selectJan(idx, j, btn) {
-  playJanVoice(j.id);   // 「グー！」などを読み上げる（決定音の代わり）
+  // ここでは読み上げない。音が出ると、何を選んだか相手に分かってしまうため。
+  // 読み上げは拡大表示の「音を出す」ボタンを押したときだけ。
+  playTapSound();
   // 他のボタンをリセット
   document.querySelectorAll("#jan-hand-row .jan-btn").forEach((b) => {
     b.classList.remove("pressed");
@@ -1400,7 +1450,7 @@ function selectJan(idx, j, btn) {
   document.getElementById("jan-reset-btn").style.display = "block";
 
   // 大きなポップアップ
-  showTapPopup({ image: j.img, text: j.label, emoji: j.emoji });
+  showTapPopup({ image: j.img, text: j.label, emoji: j.emoji, voice: j.id });
 }
 
 function resetJan() {
@@ -1425,7 +1475,10 @@ function renderVsHandRow() {
   });
 }
 
+// 対戦をやり直したときに、前回の読み上げ待ちが結果音を鳴らさないようにする目印
+let vsRound = 0;
 function playVs(playerIdx, btn) {
+  vsRound++;
   playJanVoice("pon");  // 「じゃんけん、ぽん！」を鳴らしながらシェイク
   // 押した手をハイライト → シェイクへ
   if (btn) { btn.classList.add("pressed"); btn.style.borderColor = JAN[playerIdx].dark; }
@@ -1441,7 +1494,11 @@ function playVs(playerIdx, btn) {
     const result = jankenResult(JAN[playerIdx].id, JAN[cpuIdx].id);
 
     document.getElementById("shake-view").style.display = "none";
-    playResultSound(result);
+    // 「じゃんけん、ぽん！」→ 自分の手の読み上げ → 勝ち負けの音 の順で鳴らす
+    const round = vsRound;
+    playJanVoiceThen(JAN[playerIdx].id, () => {
+      if (round === vsRound) playResultSound(result);
+    });
 
     // プレイヤーカード
     document.getElementById("player-emoji").src = JAN[playerIdx].img;
@@ -1470,6 +1527,8 @@ function playVs(playerIdx, btn) {
 }
 
 function resetVs() {
+  vsRound++;   // 読み上げ待ちだった前回の結果音を鳴らさない
+  clearTimeout(vsTimer);
   document.getElementById("reveal-view").style.display = "none";
   document.getElementById("shake-view").style.display = "none";
   document.querySelectorAll("#vs-hand-row .jan-btn").forEach((b) => {
@@ -1515,6 +1574,7 @@ function setJanMode(mode) {
   ["jmode-vs",         () => setJanMode("vs")],
   ["jan-reset-btn",    () => resetJan()],
   ["retry-btn",        () => resetVs()],
+  ["tap-popup-voice-btn", () => { if (popupVoiceKey) playJanVoice(popupVoiceKey); }],
 ].forEach(([id, fn]) => bindTap(document.getElementById(id), fn));
 
 applyPalette();
