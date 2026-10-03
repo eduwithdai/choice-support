@@ -67,8 +67,21 @@
   #sound-toggle-btn:active { opacity: .6; }
   #sound-toggle-btn.muted { opacity: .4; }
 
+  /* ── コピーライト ── */
+  /* 子どもが使う画面にも出すので、細い線で区切って控えめに置く */
+  #app-footer {
+    flex-shrink: 0;
+    border-top: 1px solid rgba(0,0,0,0.08);
+    background: #fff;
+    padding: 5px 8px;
+    text-align: center;
+    font-size: clamp(9px,1.1vw,12px);
+    line-height: 1.3;
+    color: #aaa;
+  }
+
   /* ── 共通コンテンツエリア ── */
-  #content { flex: 1; overflow: hidden; position: relative; }
+  #content { flex: 1; overflow: hidden; position: relative; min-height: 0; }
   .screen {
     position: absolute; inset: 0;
     display: none; flex-direction: column;
@@ -167,16 +180,21 @@
     animation: popupBounce .4s cubic-bezier(.34,1.56,.64,1);
     cursor: default;
   }
+  /* 画像だけを縮めてカードに収める。ボタンと文字は縮めない
+     （縦が狭い画面でも、押す場所と読む文字は大きさを保つため） */
   #tap-popup-img {
     max-width: 60vw; max-height: 55vh;
     object-fit: contain; border-radius: 20px;
+    min-height: 0; flex: 0 1 auto;
   }
   #tap-popup-emoji {
     font-size: clamp(80px,14vw,220px); line-height: 1;
+    min-height: 0; flex: 0 1 auto;
   }
   #tap-popup-text {
     font-size: clamp(28px,5vw,64px);
     font-weight: bold; color: #333; text-align: center;
+    flex-shrink: 0;
   }
   /* 拡大表示の中の「音を出す」ボタン。
      手が不自由でも押しやすいよう、大きめの当たり判定にしている。 */
@@ -187,7 +205,7 @@
     background: #4A90D9; color: #fff;
     font-family: inherit; font-weight: bold;
     font-size: clamp(18px,2.6vw,30px);
-    cursor: pointer;
+    cursor: pointer; flex-shrink: 0;
   }
   #tap-popup-voice-btn:active { opacity: .75; }
 
@@ -595,15 +613,18 @@
 
 </div><!-- /content -->
 
+<!-- コピーライト（どの画面でも常に出る） -->
+<footer id="app-footer"></footer>
+
 <!-- ═══ タップ拡大ポップアップ ═══ -->
 <div id="tap-popup-overlay">
   <div id="tap-popup-hint">長押しで閉じる</div>
   <div id="tap-popup-card">
+    <!-- 読み上げ音声があるときだけ出る。押したときだけ声が鳴る。 -->
+    <button id="tap-popup-voice-btn" style="display:none;">🔊 音を出す</button>
     <img id="tap-popup-img" style="display:none;">
     <div id="tap-popup-emoji" style="display:none;"></div>
     <div id="tap-popup-text"></div>
-    <!-- 読み上げ音声があるときだけ出る。押したときだけ声が鳴る。 -->
-    <button id="tap-popup-voice-btn" style="display:none;">🔊 音を出す</button>
   </div>
 </div>
 
@@ -1486,7 +1507,10 @@ function playVs(playerIdx, btn) {
   document.getElementById("vs-prompt").style.display = "none";
   document.getElementById("vs-hand-row").style.display = "none";
   document.getElementById("shake-view").style.display = "flex";
-  document.getElementById("shake-fist-img").src = JAN[playerIdx].img;
+  // 振っている間は実際のじゃんけんと同じく、必ずグーを出しておく
+  // （選んだ手がここで見えてしまわないようにする意味もある）
+  const guu = JAN.find((j) => j.id === "guu") || JAN[0];
+  document.getElementById("shake-fist-img").src = guu.img;
 
   clearTimeout(vsTimer);
   vsTimer = setTimeout(() => {
@@ -1562,6 +1586,19 @@ function setJanMode(mode) {
   else { resetVs(); renderVsHandRow(); }
 }
 
+// ─── コピーライト ──────────────────────────────────────────
+// 公開した年から今の年までを出す。年が変わると「2026–2027」のように
+// 自動で範囲表示になる（端末の時計が公開年より前なら公開年だけ）。
+const COPYRIGHT_FROM_YEAR = 2026;
+function renderCopyright() {
+  const now = new Date().getFullYear();
+  const years = now > COPYRIGHT_FROM_YEAR
+    ? COPYRIGHT_FROM_YEAR + "–" + now
+    : String(COPYRIGHT_FROM_YEAR);
+  document.getElementById("app-footer").textContent =
+    "© " + years + " eduwithdai. All rights reserved.";
+}
+
 // ─── 初期化 ───────────────────────────────────────────────
 // 固定のボタンを、触れた瞬間に反応するタップ処理へつなぐ
 [
@@ -1577,6 +1614,7 @@ function setJanMode(mode) {
   ["tap-popup-voice-btn", () => { if (popupVoiceKey) playJanVoice(popupVoiceKey); }],
 ].forEach(([id, fn]) => bindTap(document.getElementById(id), fn));
 
+renderCopyright();
 applyPalette();
 renderChoiceButtons();
 renderJanHandRow();
